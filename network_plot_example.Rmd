@@ -1,0 +1,195 @@
+---
+title: "code example of network illustration"
+author: "Boyan Zhou"
+date: "2024/06/20"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+  pdf_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r path setting, message=FALSE, include=FALSE}
+
+# load toy example dataset
+
+load(file = "network_plot_example.Rdata")
+
+```
+
+
+# 1. Draw network by ggnet2
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(GGally)   # include ggnet2
+library(network)
+
+######################################
+# Function1: draw basic network plot #
+######################################
+
+draw_network <- function(input_network_res) {
+  # input_network_res <- miRNA_gene_correlation_table
+  # 1. create nodes of both miRNA and protein 
+  num_nodes <- length(unique(c(input_network_res$miRNA, 
+                             input_network_res$gene_symbol)))
+  node_names <- c(unique(input_network_res$miRNA),
+                unique(input_network_res$gene_symbol))
+
+  # 2. two types in the same order as node_names
+  node_types <- rep(c("miRNA", "protein"),
+                  c(length(unique(input_network_res$miRNA)),
+                    length(unique(input_network_res$gene_symbol))))
+  
+  # 3. define the shape of nodes, 17: triangle, 16: circle
+  node_shape <- rep(c(17, 16), c(length(unique(input_network_res$miRNA)),
+                                 length(unique(input_network_res$gene_symbol))))
+  
+  # 4. define the size of nodes
+  node_size <- rep(c(12, 6), c(length(unique(input_network_res$miRNA)),
+                               length(unique(input_network_res$gene_symbol))))
+
+  # 5. set the color of nodes for miRNA and target gene
+  node_color1 <- input_network_res$up_down_regulate[match(unique(input_network_res$miRNA),
+                                                          input_network_res$miRNA)]
+  node_color1[node_color1 == "up_regulated"] <- "red"
+  node_color1[node_color1 == "down_regulated"] <- "blue"
+  node_color2 <- input_network_res$up_down_regulate[match(unique(input_network_res$gene_symbol),
+                                                          input_network_res$gene_symbol)]
+  node_color2[node_color2 == "up_regulated"] <- "blue"
+  node_color2[node_color2 == "down_regulated"] <- "red"
+  node_color <- c(node_color1, node_color2)
+  
+  # 6. draw the network plot
+  net1 <- network::network.initialize(num_nodes, directed=TRUE)
+  network.vertex.names(net1) <- node_names
+  net1[as.matrix(input_network_res[, 1:2])] <- 1
+  
+  net1 %v% "level" = node_types
+  net1 %v% "ncol" = node_color
+  net1 %v% "size" = node_size
+  net1 %v% "shape" = node_shape
+  net1 %v% "lsize" = sna::degree(net1)/3
+  net1 %e% "weights" = input_network_res$Coefficient
+
+  net_plot <- ggnet2(net1, label = T, label.size = 5, edge.size = 1, node.color = "ncol", node.size = 'size', alpha = 'level', node.shape = "shape" , alpha.legend = NA, size.legend = NA)+ guides(alpha= FALSE, size = FALSE)
+  return(net_plot)
+}
+
+##############################
+# Get the basic network plot #
+##############################
+network_plot <- draw_network(miRNA_gene_correlation_table_toy)
+dev.copy(jpeg,'network_plot_example.png', width=10, height=10, units="in", res=500)
+dev.off()
+
+###########################################
+# filter the network by connection number #
+###########################################
+filter_network <- function(cor_res_input, least_connections) {
+  # cor_res_input <- cor_res_all_miRNA_sig
+  # least_connections <- 3
+  miRNA_freq_table <- data.frame(table(cor_res_input$miRNA))
+  miRNA_passed <- as.character(miRNA_freq_table[miRNA_freq_table$Freq >= least_connections, 1])    
+  cor_res_input_filtered <- cor_res_input[cor_res_input$miRNA %in% miRNA_passed,]
+  return(cor_res_input_filtered)
+}
+
+# Only the miRNAs correlated with at least 3 proteins are reserved
+miRNA_gene_correlation_table_filter_3 <- filter_network(miRNA_gene_correlation_table, 3)
+
+```
+
+# 2. Draw chord diagram by circlize
+```{r message=FALSE, warning=FALSE, include=FALSE}
+##############################
+# CIRCOS plot/chord diagram #
+##############################
+
+library(circlize)
+
+# nodes of both miRNA and protein 
+  chord_df <- miRNA_gene_correlation_table_toy
+  chord_df$miRNA <- unlist(lapply(chord_df$miRNA, function(x) {substr(x, 5, nchar(x))})) 
+
+##########################
+# 1. basic chord diagram #
+##########################
+
+circos.par(start.degree = 90)
+chordDiagram(chord_df[,1:3], annotationTrack = "grid", 
+    preAllocateTracks = list(track.height = max(strwidth(unlist(dimnames(chord_df))))))
+  
+circos.track(track.index = 1, panel.fun = function(x, y) {
+    circos.text(CELL_META$xcenter, CELL_META$ylim[1], CELL_META$sector.index, 
+        facing = "clockwise", niceFacing = TRUE, adj = c(0, 0.5))
+}, bg.border = NA)
+circos.clear()
+
+dev.copy(jpeg,'basic_chord_diagram_example.png', width=8, height=8, units="in", res=500)
+dev.off()
+
+#############################
+# 2. modified chord diagram #
+#############################
+# If You Want To Label The Names In Different Colors
+
+# 1. set the color of names of miRNAs and genes based on regulation direction
+node_color1 <- chord_df$up_down_regulate[match(unique(chord_df$miRNA), chord_df$miRNA)]
+node_color1[node_color1 == "up_regulated"] <- "red"
+node_color1[node_color1 == "down_regulated"] <- "blue"
+node_color2 <- chord_df$up_down_regulate[match(unique(chord_df$gene_symbol), chord_df$gene_symbol)]
+node_color2[node_color2 == "up_regulated"] <- "blue"
+node_color2[node_color2 == "down_regulated"] <- "red"
+node_color <- c(node_color1, node_color2)
+
+# 2. plot direction
+circos.par(start.degree = -90)
+# 3. size and font
+par(cex = 0.7, mar = c(0, 0, 0, 0)) 
+# 4. main plot
+chordDiagram(chord_df[,1:3], annotationTrack = "grid", preAllocateTracks = list(track.height = max(strwidth(unlist(dimnames(chord_df))))))
+
+# 5. add names of miRNAs and genes to the plot
+all_factor_names <- c(unique(chord_df$miRNA), unique(chord_df$gene_symbol))
+for (i in seq_len(length(all_factor_names))) { 
+  # use for loop to label each sector
+  myFactor <- all_factor_names[i] # assuming this defines the sectors
+  print(myFactor)
+  myCol <- node_color[i] # defined in the question
+  circos.track(track.index = 1, factor = myFactor,
+    panel.fun = function(x, y) {
+      xlim = get.cell.meta.data("xlim")
+      ylim = get.cell.meta.data("ylim")
+      sector.name = get.cell.meta.data("sector.index")
+      circos.text(mean(xlim), 
+        ylim[1] + .00001, 
+        sector.name,
+        col = myCol,
+        facing = "clockwise",
+        # cex=3,
+        niceFacing = TRUE, 
+        adj = c(-0.5, 0.5))
+        circos.axis(h = "top", 
+        labels.cex = 1,
+        # major.tick.percentage = 0.2, 
+        # sector.index = sector.name, 
+        track.index = 2)
+      },
+    bg.border = NA)
+}
+
+circos.clear()  
+# 6. save the plot
+dev.copy(jpeg,'modified_chord_diagram_example.png', width=8, height=8, units="in", res=500)
+dev.off()
+
+
+```
+
